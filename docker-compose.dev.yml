@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # FastAPI应用服务（开发环境）
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: fastapi-app-dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/fastapi_dev
+      - SECRET_KEY=dev-secret-key-for-development-only
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    networks:
+      - fastapi-dev-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # PostgreSQL数据库服务（开发环境）
+  db:
+    image: postgres:15-alpine
+    container_name: fastapi-db-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=fastapi_dev
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - fastapi-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fastapi_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis缓存服务（开发环境）
+  redis:
+    image: redis:7-alpine
+    container_name: fastapi-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - fastapi-dev-network
+    command: ["redis-server", "--appendonly", "yes"]
+
+  # pgAdmin数据库管理工具（开发环境）
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: fastapi-pgadmin-dev
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - fastapi-dev-network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  fastapi-dev-network:
+    driver: bridge 

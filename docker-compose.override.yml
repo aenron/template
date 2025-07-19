@@ -1,0 +1,46 @@
+# 本地开发环境覆盖配置
+# 这个文件会被docker-compose自动加载，用于覆盖默认配置
+
+version: '3.8'
+
+services:
+  app:
+    # 开发环境使用本地代码挂载
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  db:
+    # 开发环境暴露数据库端口
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=fastapi_dev
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+
+  redis:
+    # 开发环境暴露Redis端口
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+
+  # 开发环境添加pgAdmin
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: fastapi-pgadmin-dev
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - fastapi-network 

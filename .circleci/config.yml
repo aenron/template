@@ -1,0 +1,149 @@
+version: 2.1
+
+orbs:
+  python: circleci/python@2.1
+  docker: circleci/docker@2.4
+
+jobs:
+  test:
+    docker:
+      - image: cimg/python:3.11
+      - image: cimg/postgres:15
+        environment:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+      - image: cimg/redis:7
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          app-dir: ./
+      - run:
+          name: Install additional dependencies
+          command: |
+            pip install pytest-cov pytest-asyncio httpx flake8 black isort bandit safety
+      - run:
+          name: Run linting
+          command: |
+            flake8 app/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+            black --check app/ tests/
+            isort --check-only app/ tests/
+      - run:
+          name: Run tests
+          command: |
+            pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+          environment:
+            DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+            SECRET_KEY: test-secret-key-for-circleci
+            DEBUG: true
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: coverage.xml
+          destination: coverage
+
+  security:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          app-dir: ./
+      - run:
+          name: Install security tools
+          command: |
+            pip install bandit safety
+      - run:
+          name: Run security scans
+          command: |
+            bandit -r app/ -f json -o bandit-report.json || true
+            safety check --json --output safety-report.json || true
+      - store_artifacts:
+          path: bandit-report.json
+          destination: security
+      - store_artifacts:
+          path: safety-report.json
+          destination: security
+
+  build:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Build Docker image
+          command: |
+            docker build -t fastapi-project:$CIRCLE_SHA1 .
+            docker build -t fastapi-project:latest .
+      - run:
+          name: Test Docker image
+          command: |
+            docker run --rm -d --name test-app -p 8000:8000 fastapi-project:latest
+            sleep 10
+            curl -f http://localhost:8000/health || exit 1
+            docker stop test-app
+
+  deploy-staging:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - run:
+          name: Deploy to staging
+          command: |
+            echo "Deploying to staging environment..."
+            # Add your deployment script here
+            # ssh user@staging-server "cd /opt/fastapi-project && docker-compose pull && docker-compose up -d"
+      - run:
+          name: Run smoke tests
+          command: |
+            echo "Running smoke tests..."
+            # curl -f https://staging.example.com/health
+
+  deploy-production:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - run:
+          name: Deploy to production
+          command: |
+            echo "Deploying to production environment..."
+            # Add your deployment script here
+            # ssh user@production-server "cd /opt/fastapi-project && docker-compose pull && docker-compose up -d"
+      - run:
+          name: Run production tests
+          command: |
+            echo "Running production tests..."
+            # curl -f https://production.example.com/health
+
+workflows:
+  version: 2
+  test-and-deploy:
+    jobs:
+      - test
+      - security
+      - build:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - main
+                - develop
+      - deploy-staging:
+          requires:
+            - build
+          filters:
+            branches:
+              only: develop
+      - deploy-production:
+          requires:
+            - build
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/

@@ -1,0 +1,189 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  tags:
+    include:
+      - v*
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  PYTHON_VERSION: "3.11"
+  DOCKER_REGISTRY: "your-registry.azurecr.io"
+  IMAGE_NAME: "fastapi-project"
+
+stages:
+  - stage: Test
+    displayName: "Test Stage"
+    jobs:
+      - job: Test
+        displayName: "Run Tests"
+        pool:
+          vmImage: "ubuntu-latest"
+
+        services:
+          postgres:
+            image: postgres:15
+            env:
+              POSTGRES_PASSWORD: postgres
+              POSTGRES_DB: test_db
+            ports:
+              - 5432:5432
+            options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+          redis:
+            image: redis:7-alpine
+            ports:
+              - 6379:6379
+            options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(PYTHON_VERSION)"
+              addToPath: true
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+              pip install pytest-cov pytest-asyncio httpx flake8 black isort
+            displayName: "Install dependencies"
+
+          - script: |
+              flake8 app/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+              black --check app/ tests/
+              isort --check-only app/ tests/
+            displayName: "Run linting"
+
+          - script: |
+              pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+            displayName: "Run tests"
+            env:
+              DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+              SECRET_KEY: test-secret-key-for-azure-pipelines
+              DEBUG: true
+
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/test-results.xml"
+              mergeTestResults: true
+              testRunTitle: "Python Tests"
+            condition: succeededOrFailed()
+
+          - script: |
+              echo "Code coverage report generated"
+              cat coverage.xml
+            displayName: "Display coverage report"
+            condition: succeeded()
+
+  - stage: Security
+    displayName: "Security Stage"
+    jobs:
+      - job: SecurityScan
+        displayName: "Security Scan"
+        pool:
+          vmImage: "ubuntu-latest"
+
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(PYTHON_VERSION)"
+              addToPath: true
+
+          - script: |
+              pip install bandit safety
+              bandit -r app/ -f json -o bandit-report.json || true
+              safety check --json --output safety-report.json || true
+            displayName: "Run security scans"
+
+  - stage: Build
+    displayName: "Build Stage"
+    dependsOn: Test
+    condition: succeeded()
+    jobs:
+      - job: Build
+        displayName: "Build Docker Image"
+        pool:
+          vmImage: "ubuntu-latest"
+
+        steps:
+          - task: Docker@2
+            inputs:
+              containerRegistry: "your-acr-connection"
+              repository: "$(IMAGE_NAME)"
+              command: "buildAndPush"
+              Dockerfile: "**/Dockerfile"
+              tags: |
+                latest
+                $(Build.BuildId)
+                $(Build.SourceBranchName)-$(Build.BuildId)
+            displayName: "Build and push Docker image"
+
+  - stage: DeployStaging
+    displayName: "Deploy to Staging"
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployStaging
+        displayName: "Deploy to Staging Environment"
+        environment: "staging"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: SSH@0
+                  inputs:
+                    sshEndpoint: "staging-ssh-connection"
+                    runOptions: "commands"
+                    commands: |
+                      cd /opt/fastapi-project
+                      docker-compose pull
+                      docker-compose up -d
+                      sleep 10
+                      curl -f http://localhost:8000/health
+                  displayName: "Deploy to staging server"
+
+                - script: |
+                    echo "Running smoke tests..."
+                    curl -f https://staging.example.com/health
+                  displayName: "Smoke tests"
+
+  - stage: DeployProduction
+    displayName: "Deploy to Production"
+    dependsOn: Build
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/v'))
+    jobs:
+      - deployment: DeployProduction
+        displayName: "Deploy to Production Environment"
+        environment: "production"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: SSH@0
+                  inputs:
+                    sshEndpoint: "production-ssh-connection"
+                    runOptions: "commands"
+                    commands: |
+                      cd /opt/fastapi-project
+                      docker-compose pull
+                      docker-compose up -d
+                      sleep 10
+                      curl -f http://localhost:8000/health
+                  displayName: "Deploy to production server"
+
+                - script: |
+                    echo "Running production tests..."
+                    curl -f https://production.example.com/health
+                  displayName: "Production tests"
+
+                - script: |
+                    echo "Production deployment completed successfully!"
+                  displayName: "Notify deployment success"
