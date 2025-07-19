@@ -1,6 +1,6 @@
-# FastAPI 接口项目
+# FastAPI 接口模板
 
-基于 FastAPI 的高性能 RESTful API 服务项目。
+基于 FastAPI 的 RESTful API 模板。
 
 ## 项目特性
 
@@ -229,4 +229,4 @@ MIT License
 
 ## 联系方式
 
-如有问题或建议，请提交 Issue 或联系开发团队。 
+如有问题或建议，请提交 Issue 或联系开发团队。
