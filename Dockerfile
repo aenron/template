@@ -51,7 +51,7 @@ COPY --from=base /usr/local/bin /usr/local/bin
 
 # 复制应用代码
 COPY app/ ./app/
-COPY main.py .
+COPY start.py .
 
 # 创建数据目录
 RUN mkdir -p /app/data && chown -R appuser:appuser /app

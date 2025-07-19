@@ -1,6 +1,7 @@
 """
 FastAPI 应用主入口
 """
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -13,15 +14,6 @@ from app.core.exceptions import setup_exception_handlers
 # 设置日志
 setup_logging()
 
-# 创建FastAPI应用实例
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.PROJECT_DESCRIPTION,
-    version=settings.VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
 
 # 配置中间件
 def setup_middleware():
@@ -34,32 +26,50 @@ def setup_middleware():
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+
     # 可信主机中间件
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.ALLOWED_HOSTS,
     )
 
+
 # 设置路由
 def setup_routes():
     """设置API路由"""
     app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 启动事件
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时的初始化操作"""
+
+# Lifespan事件处理器
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时执行
     setup_middleware()
     setup_routes()
     setup_exception_handlers(app)
     print(f"🚀 {settings.PROJECT_NAME} 启动成功!")
 
-# 关闭事件
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时的清理操作"""
+    yield
+
+    # 关闭时执行
     print(f"👋 {settings.PROJECT_NAME} 正在关闭...")
+
+
+# 创建FastAPI应用实例
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    description=settings.PROJECT_DESCRIPTION,
+    version=settings.VERSION,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
 
 # 健康检查端点
 @app.get("/health")
@@ -71,6 +81,7 @@ async def health_check():
         "version": settings.VERSION,
     }
 
+
 # 根路径
 @app.get("/")
 async def root():
@@ -80,4 +91,4 @@ async def root():
         "version": settings.VERSION,
         "docs": "/docs",
         "redoc": "/redoc",
-    } 
+    }

@@ -39,8 +39,8 @@ cp env.example .env
 ### 启动服务
 
 ```bash
-# 方式1: 使用 Python 直接启动
-python main.py
+# 方式1: 使用增强启动脚本（推荐）
+python start.py
 
 # 方式2: 使用 uvicorn 启动
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -90,7 +90,6 @@ template/
 ├── .dockerignore         # Docker忽略文件
 ├── requirements.txt      # Python 依赖
 ├── env.example          # 环境变量示例
-├── main.py              # 启动文件
 ├── start.py             # 便捷启动脚本
 └── README.md            # 项目说明
 ```
